@@ -1,7 +1,5 @@
 # WindCatcher
 
-![License (https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-
 WindCatcher is a Python command-line interface (CLI) tool that provides weather forecasts using data from the AccuWeather website. It allows users to quickly retrieve weather information for a specific location.
 
 ## Features
