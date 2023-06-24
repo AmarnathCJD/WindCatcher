@@ -1,6 +1,7 @@
 from termcolor import colored
 from datetime import datetime
 from modules.weather import get_weather_data, fmt_cli_resp
+from modules.decoder import fetch_full_weather_data
 import sys
 
 
@@ -18,12 +19,9 @@ def start_program(city):
         city = input(colored("Enter City Name: ", "yellow", attrs=["bold"]))
     else:
         print(colored(f"City Name: {city}", "yellow", attrs=["bold"]))
-    start_time = datetime.now()
-    weather_data, city, country_code = get_weather_data(city)
-    if "error" in weather_data:
-        print(colored(f"Error: {weather_data['error']}", "red"))
-    else:
-        fmt_cli_resp(weather_data, city, country_code, start_time)
+    _err = get_weather_data(city)
+    if "error" in _err:
+        print(colored(f"Error: {_err['error']}", "red"))
 
 
 if __name__ == "__main__":
@@ -45,5 +43,5 @@ if __name__ == "__main__":
 # Author: github.com/AmarnathCJD
 # Date: 2023-06-24
 
-# Note: AccuWeather Website is used to get the weather data.
-# modules used: requests, bs4, termcolor
+# Note: AccuWeather API is used to get the weather data.
+# modules used: requests, termcolor

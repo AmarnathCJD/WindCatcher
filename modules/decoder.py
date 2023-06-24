@@ -1,29 +1,29 @@
-from bs4 import BeautifulSoup
-from requests import get, Timeout
+from termcolor import colored as cl
+
+from requests import get
 import time
 
+ACCU_API_KEY = "41b7800bfcb9447daa29f7aa40f2d1ec"
 
-def get_soup(url: str) -> BeautifulSoup:
-    """Get soup from url."""
-    headers = {
+def fetch_full_weather_data(location: str) -> dict:
+    _curr = get("https://api.accuweather.com/currentconditions/v1/{}".format(location), params={
+        "apikey": ACCU_API_KEY,
+        "details": True,
+        "language": "en-us",
+    },
+        headers={
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
         "(KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36"
-    }
+    },
+        timeout=60)
 
-    """Do get request to API and return response."""
-    try:
-        req = get(url, headers=headers, timeout=60)
-    except Timeout:
-        raise Exception("Timeout exceeded while getting soup.")
+    output = ""
+    if _curr.status_code != 200:
+        output += cl("Error: ", "red") + \
+            "Invalid city name, try re-checking the spelling."
+        return {"error": output}
+    _curr = _curr.json()[0]
 
-    if req.status_code == 200:
-        return BeautifulSoup(req.text, "html.parser")
-    else:
-        raise Exception("APIError (status code: {})".format(req.status_code))
-
-
-def parse_weather_to_json(soup: BeautifulSoup, fcast: BeautifulSoup) -> dict:
-    """Parse weather data from soup to JSON."""
     weather = {
         "current": {},
         "day": {},
@@ -31,74 +31,83 @@ def parse_weather_to_json(soup: BeautifulSoup, fcast: BeautifulSoup) -> dict:
         "forecast": [],
     }
 
-    # Get current weather data
-    current = soup.find("div", {"class": "current-weather-card"})
-    weather["current"]["Time"] = current.find("p", class_="sub").text
-    weather["current"]["Temp"] = remove_special_chars(
-        current.find("div", {"class": "display-temp"}).text
-    )
-    weather["current"]["Phrase"] = remove_special_chars(
-        current.find("div", {"class": "phrase"}).text
-    )
-    for item in current.find("div", {"class": "current-weather-details"}).find_all(
-        "div", class_="detail-item"
-    ):
-        div = item.find_all("div")
-        if len(div) < 2:
-            continue
-        weather["current"][
-            remove_special_chars(div[0].text).capitalize()
-        ] = remove_special_chars(div[1].text)
+    weather["current"]["Time"] = time.strftime("%I:%M %p", time.strptime(
+        _curr.get("LocalObservationDateTime", ""), "%Y-%m-%dT%H:%M:%S%z"))
+    weather["current"]["raining"] = _curr.get("HasPrecipitation", False)
+    weather["current"]["Temp"] = str(
+        _curr.get("Temperature", {}).get("Metric", {}).get("Value", "")) + "°C"
+    weather["current"]["Phrase"] = _curr.get("WeatherText", "")
+    weather["current"]["Realfeel sun"] = str(
+        _curr.get("RealFeelTemperature", {}).get("Metric", {}).get("Value", "")) + "°C"
+    weather["current"]["Realfeel shade"] = str(_curr.get(
+        "RealFeelTemperatureShade", {}).get("Metric", {}).get("Value", "")) + "°C"
+    weather["current"]["Max uv index"] = str(
+        _curr.get("UVIndex", "")) + " (" + _curr.get("UVIndexText", "") + ")"
+    weather["current"]["Wind"] = str(_curr.get("Wind", {}).get("Speed", {}).get("Metric", {}).get(
+        "Value", "")) + " km/h" + " " + _curr.get("Wind", {}).get("Direction", {}).get("Localized", "")
+    weather["current"]["Wind gusts"] = str(_curr.get("WindGust", {}).get(
+        "Speed", {}).get("Metric", {}).get("Value", "")) + " km/h"
+    weather["current"]["Cloud cover"] = str(_curr.get("CloudCover", "")) + "%"
+    weather["current"]["Dew point"] = str(
+        _curr.get("DewPoint", {}).get("Metric", {}).get("Value", "")) + "°C"
+    weather["current"]["Humidity"] = str(
+        _curr.get("RelativeHumidity", "")) + "%"
+    weather["current"]["Indoor humidity"] = str(
+        _curr.get("IndoorRelativeHumidity", "")) + "%"
+    weather["current"]["Visibility"] = str(
+        _curr.get("Visibility", {}).get("Metric", {}).get("Value", "")) + " km"
+    weather["current"]["Pressure"] = str(
+        _curr.get("Pressure", {}).get("Metric", {}).get("Value", "")) + " mb"
+    weather["current"]["Cloud ceiling"] = str(
+        _curr.get("Ceiling", {}).get("Metric", {}).get("Value", "")) + " m"
+    weather["current"]["24hV"] = str(_curr.get("TemperatureSummary", {}).get("Past24HourRange", {}).get("Maximum", {}).get("Metric", {}).get(
+        "Value", "")) + "°C <---> " + str(_curr.get("TemperatureSummary", {}).get("Past24HourRange", {}).get("Minimum", {}).get("Metric", {}).get("Value", "")) + "°C"
+    weather["current"]["12hV"] = str(_curr.get("TemperatureSummary", {}).get("Past12HourRange", {}).get("Maximum", {}).get("Metric", {}).get(
+        "Value", "")) + "°C <---> " + str(_curr.get("TemperatureSummary", {}).get("Past12HourRange", {}).get("Minimum", {}).get("Metric", {}).get("Value", "")) + "°C"
+    weather["current"]["6hV"] = str(_curr.get("TemperatureSummary", {}).get("Past6HourRange", {}).get("Maximum", {}).get("Metric", {}).get(
+        "Value", "")) + "°C <---> " + str(_curr.get("TemperatureSummary", {}).get("Past6HourRange", {}).get("Minimum", {}).get("Metric", {}).get("Value", "")) + "°C"
 
-    # Get day and night weather data
-    for card in soup.find_all("div", {"class": "half-day-card"}):
-        if "day" in card.find("h2").text.lower():
-            weather_ = weather["day"]
-        else:
-            weather_ = weather["night"]
+    _fcast = get("https://api.accuweather.com/forecasts/v1/daily/5day/{}".format(location), params={
+        "apikey": ACCU_API_KEY,
+        "details": True,
+        "metric": True,
+        "language": "en-us",
+    },
+        headers={
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+        "(KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36"
+    },
+        timeout=60)
 
-        weather_["Date"] = card.find("span", class_="short-date").text.strip()
-        weather_["Temp"] = remove_special_chars(
-            card.find("div", {"class": "temperature"}).text.strip().split("°")[0] + "°"
-        )
-        weather_["Phrase"] = remove_special_chars(
-            card.find("div", {"class": "phrase"}).text.strip()
-        )
+    if _fcast.status_code != 200:
+        output += cl("Error: ", "red") + \
+            "Invalid city name, try re-checking the spelling."
+        return {"error": output}
 
-        for item in card.find("div", {"class": "panels"}).find_all(
-            "p", class_="panel-item"
-        ):
-            panel_ = item.text.split("\n")[0].strip()
-            value_ = item.find("span").text.strip()
-            weather_[
-                remove_special_chars(panel_.replace(value_, ""))
-            ] = remove_special_chars(value_)
-
-    # get forecast data
-    for wr in fcast.find_all("div", {"class": "daily-wrapper"}):
-        forecast = {}
-
-        date = wr.find("h2", {"class": "date"})
-        forecast["Date"] = (
-            date.find("span").text.strip() + " " + date.find_all("span")[1].text.strip()
-        )
-        temp = wr.find("div", {"class": "temp"})
-        forecast["Temp"] = {
-            "min": remove_special_chars(temp.find("span", {"class": "low"}).text.lstrip("/")),
-            "max": remove_special_chars(temp.find("span", {"class": "high"}).text),
-        }
-        forecast["Precipitation"] = remove_special_chars(
-            wr.find("div", {"class": "precip"}).text.strip()
-        )
-        for item in card.find("div", {"class": "panels"}).find_all(
-            "p", class_="panel-item"
-        ):
-            panel_ = item.text.split("\n")[0].strip()
-            value_ = item.find("span").text.strip()
-            forecast[
-                remove_special_chars(panel_.replace(value_, ""))
-            ] = remove_special_chars(value_)
-        weather["forecast"].append(forecast)
+    _fcast = _fcast.json()
+    for day in _fcast["DailyForecasts"]:
+        weather["forecast"].append({
+            "Date": time.strftime("%d/%m/%Y", time.strptime(day.get("Date", ""), "%Y-%m-%dT%H:%M:%S%z")),
+            "Temp": {
+                "max": str(day.get("Temperature", {}).get("Maximum", {}).get("Value", "")) + "°C",
+                "min": str(day.get("Temperature", {}).get("Minimum", {}).get("Value", "")) + "°C",
+            },
+            "Rain": str(day.get("Day", {}).get("RainProbability", "")) + "%",
+            "Hours of Precipitation": str(day.get("Day", {}).get("HoursOfRain", "")),
+            "Cloud Cover": str(day.get("Day", {}).get("CloudCover", "")) + "%",
+            "Wind": str(day.get("Day", {}).get("Wind", {}).get("Speed", {}).get("Value", "")) + " km/h" + " " + day.get("Day", {}).get("Wind", {}).get("Direction", {}).get("Localized", ""),
+            "Wind Gusts": str(day.get("Day", {}).get("WindGust", {}).get("Speed", {}).get("Value", "")) + " km/h",
+            "Max UV Index": str(day.get("AirAndPollen", {})[-1].get("Value", "")) + " (" + day.get("AirAndPollen", {})[-1].get("Category", "") + ")",
+            "Hours of Sun": str(day.get("Day", {}).get("HoursOfSun", "")),
+            "Moon": day.get("Moon", {}).get("Phase", ""),
+            "Moon rise": time.strftime("%I:%M %p", time.strptime(day.get("Moon", {}).get("Rise", ""), "%Y-%m-%dT%H:%M:%S%z")),
+            "Moon set": time.strftime("%I:%M %p", time.strptime(day.get("Moon", {}).get("Set", ""), "%Y-%m-%dT%H:%M:%S%z")),
+            "SunRise": time.strftime("%I:%M %p", time.strptime(day.get("Sun", {}).get("Rise", ""), "%Y-%m-%dT%H:%M:%S%z")),
+            "SunSet": time.strftime("%I:%M %p", time.strptime(day.get("Sun", {}).get("Set", ""), "%Y-%m-%dT%H:%M:%S%z")),
+            "AIQ": str(day.get("AirAndPollen", {})[0].get("Value", "")) + " (" + day.get("AirAndPollen", {})[0].get("Category", "") + ")",
+            "Snow": str(day.get("Day", {}).get("Snow", {}).get("Value", "")) + " cm",
+            "Ice": str(day.get("Day", {}).get("Ice", {}).get("Value", "")) + " mm",
+        })
 
     return weather
 

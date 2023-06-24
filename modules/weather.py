@@ -1,5 +1,5 @@
 from requests import get, Timeout as ReqOut
-from .decoder import get_soup, parse_weather_to_json
+from .decoder import ACCU_API_KEY, fetch_full_weather_data
 from .errors import Timeout, InvalidCityError, APIError
 from termcolor import colored
 from datetime import datetime
@@ -8,15 +8,12 @@ from datetime import datetime
 def get_weather_data(city: str) -> dict:
     """Get weather data from API."""
     try:
-        city = get_city_name(city)
-        weather_link, city, country_code = format_weather_link(city)
-        _currw = get_soup(weather_link)
-        _castw = get_soup(
-            weather_link.replace("current-weather", "daily-weather-forecast")
-        )
-        return parse_weather_to_json(_currw, _castw), city, country_code
+        city, timetaken = get_city_name(city)
+        fmt_cli_resp(fetch_full_weather_data(city.get("Key", "")), city.get(
+            "LocalizedName", ""), city.get("Country", {}).get("LocalizedName", ""), datetime.now() - timetaken)
+        return {}
     except Exception as e:
-        return {"error": str(e)}, "", ""
+        return {"error": str(e)}
 
 
 def get_city_name(city: str) -> str:
@@ -27,24 +24,29 @@ def get_city_name(city: str) -> str:
         "(KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36"
     }
 
-    params = {"query": city, "language": "en-us"}
+    params = {"q": city, "language": "en-us",
+              "apikey": ACCU_API_KEY, "details": True}
 
     """Do get request to API and return response."""
+    req_time = datetime.now()
     try:
         req = get(
-            "https://www.accuweather.com/web-api/autocomplete",
+            "https://api.accuweather.com/locations/v1/cities/autocomplete",
             params=params,
             headers=headers,
-            timeout=60,
+            timeout=10,
         )
     except ReqOut:
-        raise Timeout
+        raise Timeout("Timeout (10s)") from None
+    
+    req_end_time = datetime.now()
 
     if req.status_code == 200:
         if len(req.json()) == 0:
-            raise InvalidCityError("Invalid city name, try re-checking the spelling.")
+            raise InvalidCityError(
+                "Invalid city name, try re-checking the spelling.")
         if len(req.json()) == 1:
-            return req.json()[0]
+            return req.json()[0], req_end_time - req_time
         print(colored("Multiple cities found, please select one.", "yellow"))
         num_index = 0
         for city in req.json():
@@ -53,9 +55,10 @@ def get_city_name(city: str) -> str:
                 colored(
                     "[{}] {} ({}, {})".format(
                         num_index,
-                        city.get("localizedName", ""),
-                        city.get("administrativeArea", {}).get("localizedName", ""),
-                        city.get("country", {}).get("localizedName", ""),
+                        city.get("LocalizedName", ""),
+                        city.get("AdministrativeArea", {}).get(
+                            "LocalizedName", ""),
+                        city.get("Country", {}).get("LocalizedName", ""),
                     ),
                     "cyan",
                 )
@@ -65,36 +68,12 @@ def get_city_name(city: str) -> str:
                 index = int(input(colored("Select City: ", "yellow")))
                 if index < 1 or index > num_index:
                     raise ValueError
-                return req.json()[index - 1]
+                return req.json()[index - 1], req_end_time - req_time
             except ValueError:
                 print(colored("Invalid index, try again.", "red"))
 
     else:
         raise APIError("APIError (status code: {})".format(req.status_code))
-
-
-def format_weather_link(data) -> str:
-    """Format weather link from The JSONData."""
-    try:
-        country_code = data.get("country", {}).get("id", "").lower()
-        city_name = data.get("localizedName", "").lower().replace(" ", "-")
-        city_key = data.get("key", "")
-    except AttributeError:
-        return (
-            "Failed to get city data, Make sure you have entered the correct city name."
-        )
-
-    return (
-        "https://www.accuweather.com/{}/{}/{}/{}/current-weather/{}".format(
-            "en",
-            country_code,
-            city_name,
-            city_key,
-            city_key,
-        ),
-        city_name,
-        country_code,
-    )
 
 
 def get_current_date():
@@ -113,7 +92,13 @@ def fmt_cli_resp(data, city: str, country_code: str, start_time: datetime) -> st
     )
     print(
         colored(
-            f" - {data.get('current', {}).get('Time', 'N/A')} | Temp: {data.get('current', {}).get('Temp', 'N/A')} | Feels: {data.get('current', {}).get('Phrase', 'N/A')} | AQI (?)",
+            f" - Temp: {data.get('current', {}).get('Temp', 'N/A')} | Fahrenheit: {int(float(data.get('current', {}).get('Temp', '0°C').split('°')[0]))*9/5+32}°F | Kelvin: {int(float(data.get('current', {}).get('Temp', '0°C').split('°')[0]))+273.15}K",
+            "magenta",
+        )
+    )
+    print(
+        colored(
+            f" - {data.get('current', {}).get('Time', 'N/A')} | Raining: {data.get('current', {}).get('raining', 'False')} | Feels: {data.get('current', {}).get('Phrase', 'N/A')} | AQI (?)",
             "red",
         )
     )
@@ -142,49 +127,31 @@ def fmt_cli_resp(data, city: str, country_code: str, start_time: datetime) -> st
         )
     )
 
-    print(colored("\n[*] DayTime Forecast", "red", attrs=["bold"]))
+    print(colored("\n[*] Temperature Variations", "red", attrs=["bold"]))
     print(
         colored(
-            f" - Temp: {data.get('day', {}).get('Temp', 'N/A')} | Feels: {data.get('day', {}).get('Phrase', 'N/A')} | AQI (?)",
-            "yellow",
-        )
-    )
-    print(
-        colored(
-            f" - UV Index: {data.get('day', {}).get('Max UV Index', 'N/A')} | Wind: {data.get('day', {}).get('Wind', 'N/A')} | Gusts: {data.get('day', {}).get('Wind Gusts', 'N/A')}",
+            f" - Past 24 Hours: {data.get('current', {}).get('24hV', 'N/A')}",
             "green",
         )
     )
     print(
         colored(
-            f" - Cloud Cover: {data.get('day', {}).get('Cloud Cover', 'N/A')} | Rain: {data.get('day', {}).get('Rain', 'N/A')} | Thunder: {data.get('day', {}).get('Probability of Thunderstorms', 'N/A')}",
-            "blue",
-        )
-    )
-
-    print(colored("\n[*] NightTime Forecast", "red", attrs=["bold"]))
-    print(
-        colored(
-            f" - Temp: {data.get('night', {}).get('Temp', 'N/A')} | Feels: {data.get('night', {}).get('Phrase', 'N/A')} | AQI (?)",
-            "yellow",
-        )
-    )
-    print(
-        colored(
-            f" - UV Index: {data.get('night', {}).get('Max UV Index', 'N/A')} | Wind: {data.get('night', {}).get('Wind', 'N/A')} | Gusts: {data.get('night', {}).get('Wind Gusts', 'N/A')}",
+            f" - Past 12 Hours: {data.get('current', {}).get('12hV', 'N/A')}",
             "green",
         )
     )
     print(
         colored(
-            f" - Cloud Cover: {data.get('night', {}).get('Cloud Cover', 'N/A')} | Rain: {data.get('night', {}).get('Rain', 'N/A')} | Thunder: {data.get('night', {}).get('Probability of Thunderstorms', 'N/A')}",
-            "blue",
+            f" - Past 06 Hours: {data.get('current', {}).get('6hV', 'N/A')}",
+            "green",
         )
     )
 
     print(colored("\n[*] Forecast for next 5 days", "red", attrs=["bold"]))
     forecast = data.get("forecast", [])
-    for i in range(5):
+    i = -2
+    for v in range(5):
+        i += 1
         print(
             colored(
                 f" -> {forecast[i+1].get('Date', 'N/A')} | {forecast[i+1].get('Temp', {}).get('max', 'N/A')} >>>>> {forecast[i+1].get('Temp', {}).get('min', 'N/A')}",
@@ -201,8 +168,29 @@ def fmt_cli_resp(data, city: str, country_code: str, start_time: datetime) -> st
         print(
             colored(
                 " " * 3
-                + f"- Wind: {forecast[i+1].get('Wind', ' N/A')[1:]} | Gusts: {forecast[i+1].get('Wind Gusts', 'N/A')} | Thunder: {forecast[i+1].get('Probability of Thunderstorms', 'N/A')}",
+                + f"- Wind: {forecast[i+1].get('Wind', ' N/A')[1:]} | Gusts: {forecast[i+1].get('Wind Gusts', 'N/A')} | AIQ: {forecast[i+1].get('AIQ', 'N/A')}",
                 "yellow",
+            )
+        )
+        print(
+            colored(
+                " " * 3
+                + f"- UV Index: {forecast[i+1].get('Max UV Index', 'N/A')} | Snow: {forecast[i+1].get('Snow', 'N/A')} | Ice: {forecast[i+1].get('Ice', 'N/A')}",
+                "blue",
+            )
+        )
+        print(
+            colored(
+                " " * 3
+                + f"- SunRise: {forecast[i+1].get('SunRise', 'N/A')} | SunSet: {forecast[i+1].get('SunSet', 'N/A')}",
+                "cyan",
+            )
+        )
+        print(
+            colored(
+                " " * 3
+                + f"- Moon: {forecast[i+1].get('Moon', '')} | Rise: {forecast[i+1].get('Moon rise', 'N/A')} | Set: {forecast[i+1].get('Moon set', 'N/A')}",
+                "light_red",
             )
         )
     print(
