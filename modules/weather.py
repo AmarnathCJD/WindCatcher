@@ -35,7 +35,7 @@ def get_city_name(city: str) -> str:
             "https://www.accuweather.com/web-api/autocomplete",
             params=params,
             headers=headers,
-            timeout=10,
+            timeout=60,
         )
     except ReqOut:
         raise Timeout
