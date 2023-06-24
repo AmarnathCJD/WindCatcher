@@ -12,7 +12,7 @@ def get_soup(url: str) -> BeautifulSoup:
 
     """Do get request to API and return response."""
     try:
-        req = get(url, headers=headers, timeout=10)
+        req = get(url, headers=headers, timeout=60)
     except Timeout:
         raise Exception("Timeout exceeded while getting soup.")
 
